@@ -1,0 +1,119 @@
+'''
+Script is written by Naveen Kumar
+'''
+
+import re
+import telnetlib
+import time
+import sys
+
+from time import gmtime, strftime
+date_time=strftime("%Y-%m-%d %H_%M_%S", gmtime())
+intF_
+csv_handler=open('INTF_POWER_'+date_time+'.csv','w')
+csv_handler.write('Node IP'+','+'Hostname'+','+'Interface Name'+','+'Connector or Form Factor'+','+'Tx Power or Lane 0(hundred gig)'+','+'Rx Power or Lane0(hundred gig)'+','+'Tx Power Lane 1'+','+'Rx Power Lane 1'+','+'Tx Power Lane 2'+','+'Rx Power Lane 2'+','+'Tx Power Lane 3'+','+'Rx Power Lane 3'+','+'\n')
+
+def telNetCall(ip,cmds,file_name,mode):
+        host  = ip
+        user  = "cisco_tac"
+        password = "Careful@123"
+        try:
+                telnet  = telnetlib.Telnet(host)
+                time.sleep(2)
+        except:
+                print(ip+" have accessiablity issues.Please fix it")
+                print("Data Collection failed for "+ip+ " !!!")
+        else:
+                telnet.read_until('Username: ', 3)
+                telnet.write(user + '\r')
+                telnet.read_until('Password: ', 3)
+                telnet.write(password + '\r')
+                telnet.write("term len 0" + '\n')
+                for cmd in cmds:
+                        telnet.write(cmd + "\n")
+                telnet.write('exit' + '\n')
+                a=telnet.read_all()
+                f = open(file_name, mode)
+                f.write(str(a))
+                print "Data Collection is done from "+ip+ " !!!"
+                f.close()
+
+def phy_interface(data):
+        phy_intfs=[]
+        data = data.split('\n')
+        for line in data:
+                phy_list = re.findall('(TenGigE[0-9\/]+|GigabitEthernet[0-9\/]+|HundredGigE[0-9\/]+)\s+[a-z0-9\.]+\s+Up\s+Up',line)
+                if phy_list:
+                        phy_intfs.append(str(phy_list))
+        return phy_intfs
+
+def intf_power_capture(data):
+	req_capture = []
+	intf_data = re.findall('(PHY data for interface:.*?)show controllers',data,re.DOTALL)
+	for per_intf_data in intf_data:
+		req_capture += re.findall('PHY data for interface:\s(TenGigE[0-9\/]+)\s+SFP\sEEPROM.*?Xcvr\sCode:\s(\S+).*?Tx Power:\s+(\S+\smW\s\S+\sdBm\S)\s+Rx Power:\s+(\S+\smW\s\S+\sdBm\S)',per_intf_data,re.DOTALL)
+		
+		req_capture += re.findall('PHY data for interface:\s(TenGigE[0-9\/]+)\s+XFP\sEEPROM.*?Product\sID:\s(\S+).*?Tx Power:\s+(\S+\smW\s\S+\sdBm\S)\s+Rx Power:\s+(\S+\smW\s\S+\sdBm\S)',per_intf_data,re.DOTALL)
+		
+		req_capture += re.findall('PHY data for interface:\s(GigabitEthernet[0-9\/]+)\s+SFP\s+EEPROM\s+port:\s+[0-9]+\s+Xcvr Type:\s+SFP\s+Xcvr\sCode:\s(1000BASE-[A-Z]{2,}).*?Tx Power:\s+(\S+\smW\s\S+\sdBm\S)\s+Rx Power:\s+(\S+\smW\s\S+\sdBm\S).*?EEPROM Memory',per_intf_data,re.DOTALL)
+
+		req_capture += re.findall('PHY data for interface:\s(HundredGigE[0-9\/]+).*?CFP\s+EEPROM.*?Product\sID:\s(\S+).*?Tx\sPower\s+Rx\sPower.*?mAmps\s+(\S+\smW\s\S+\sdBm\S)\s+(\S+\smW\s\S+\sdBm\S).*?mAmps\s+(\S+\smW\s\S+\sdBm\S)\s+(\S+\smW\s\S+\sdBm\S).*?mAmps\s+(\S+\smW\s\S+\sdBm\S)\s+(\S+\smW\s\S+\sdBm\S).*?mAmps\s+(\S+\smW\s\S+\sdBm\S)\s+(\S+\smW\s\S+\sdBm\S)',per_intf_data,re.DOTALL)
+		
+	return req_capture 	
+
+def host_name(data):
+	hostname = re.findall('hostname\s(\S+)',data)
+	return hostname
+
+cmds = ['show ipv4 interface brief','show running-config | inc hostname']
+
+ip = [i.strip() for i in open("ASR9k-IP")]
+
+for c in ip:
+        file_name = c+'_intf_output.txt'
+        telNetCall(c,cmds,file_name,'w')
+
+for c in ip:
+        file_name = c+'_intf_output.txt'
+        try:
+                file = open(file_name,"r")
+        except:
+                print "Output file for " + c + " don't exists"
+                continue
+
+        data = file.read()
+        file.close()
+	
+	intf_cmds = []
+	for line in phy_interface(data):
+		line = line.replace("'","")
+		line = line.replace("[","")
+		line = line.replace("]","")
+
+		temp_cmd = ['show controllers ' + str(line) + ' phy']
+		intf_cmds = intf_cmds + temp_cmd
+	telNetCall(c,intf_cmds,file_name,'a')
+
+for c in ip:
+	file_name = c+'_intf_output.txt'
+	try:
+		file = open(file_name,"r")
+        except:
+                print "Output file for " + c + " don't exists"
+                continue
+
+        data = file.read()
+        file.close()
+	
+	node_host_name = host_name(data)
+	
+	for item in intf_power_capture(data):
+		csv_handler.write(c+','+str(node_host_name)+',')
+		for count in item:
+	#		print item
+			csv_handler.write(count+',')
+		csv_handler.write('\n')
+	
+
+csv_handler.close()
+
